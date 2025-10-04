@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.npm
+
+# Build outputs
+frontend/dist/
+frontend/.vite/
+backend/target/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.class
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Maven wrapper cache
+backend/.mvn/wrapper/maven-wrapper.jar.tmp
+
+# Logs
+*.log
+logs/
+
+# Task/plan files
+task.md
