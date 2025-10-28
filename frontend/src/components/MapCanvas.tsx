@@ -1,9 +1,11 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import type { LocationNode } from '../data/keyinfo';
 import { UJJAIN_LOCATIONS, UJJAIN_BACKUP_ROUTES } from '../data/keyinfo';
 import type { SimMetrics } from '../data/simulationEngine';
+
+declare const google: any;
 
 interface MapCanvasProps {
     simulationActive: boolean;
@@ -15,42 +17,49 @@ interface MapCanvasProps {
 }
 
 const UJJAIN_CENTER: [number, number] = [23.1800, 75.7720];
-
-// Dark CartoDB tile — matches the reference demo's dark vector aesthetic
 const DARK_TILE = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+
+const darkMapStyle = [
+    { elementType: 'geometry', stylers: [{ color: '#0f172a' }] },
+    { elementType: 'labels.text.stroke', stylers: [{ color: '#0b0f19' }] },
+    { elementType: 'labels.text.fill', stylers: [{ color: '#64748b' }] },
+    { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
+    { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#475569' }] },
+    { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#0b1329' }] },
+    { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1e293b' }] },
+    { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#0f172a' }] },
+    { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#475569' }] },
+    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#334155' }] },
+    { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#1e293b' }] },
+    { featureType: 'road.highway', elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
+    { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#0b1329' }] },
+    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#070b13' }] },
+    { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#334155' }] },
+];
 
 function buildMarkerHTML(node: LocationNode, sim: boolean, isSelected: boolean, ns?: any): string {
     const sel = isSelected ? 'outline:3px solid #22d3ee;outline-offset:3px;' : '';
-
     if (sim && ns) {
         const vfr = ns.vfr.toFixed(2);
-
-        if (ns.status === 'danger') {
-            return `
+        if (ns.status === 'danger') return `
 <div style="position:relative;width:56px;height:56px;display:flex;align-items:center;justify-content:center;">
   <div style="position:absolute;width:56px;height:56px;border-radius:50%;background:rgba(239,68,68,0.25);animation:crush-ping 1s ease-out infinite;"></div>
   <div style="position:absolute;width:40px;height:40px;border-radius:50%;background:rgba(239,68,68,0.2);animation:crush-ping 1s ease-out infinite;animation-delay:0.4s;"></div>
   <div style="position:relative;width:30px;height:30px;border-radius:50%;background:#dc2626;border:2px solid #fca5a5;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px;font-weight:700;box-shadow:0 0 18px rgba(239,68,68,0.9);${sel}">⚡</div>
   <div style="position:absolute;bottom:-24px;left:50%;transform:translateX(-50%);background:rgba(69,10,10,0.97);border:1px solid #ef4444;color:#fca5a5;font-family:monospace;font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;white-space:nowrap;letter-spacing:0.05em;text-transform:uppercase;">CRUSH ${vfr}</div>
 </div>`;
-        }
-
-        if (ns.status === 'warning') {
-            return `
+        if (ns.status === 'warning') return `
 <div style="position:relative;width:48px;height:48px;display:flex;align-items:center;justify-content:center;">
   <div style="position:absolute;width:44px;height:44px;border-radius:50%;background:rgba(245,158,11,0.2);animation:crush-ping 1.2s ease-out infinite;"></div>
   <div style="position:relative;width:28px;height:28px;border-radius:50%;background:#d97706;border:2px solid #0f172a;display:flex;align-items:center;justify-content:center;color:#0f172a;font-size:13px;font-weight:700;box-shadow:0 0 12px rgba(245,158,11,0.7);${sel}">⚠</div>
   <div style="position:absolute;bottom:-22px;left:50%;transform:translateX(-50%);background:rgba(120,53,15,0.97);border:1px solid #f59e0b;color:#fcd34d;font-family:monospace;font-size:9px;padding:2px 5px;border-radius:3px;white-space:nowrap;">WARN ${vfr}</div>
 </div>`;
-        }
-
         return `
 <div style="position:relative;width:40px;height:40px;display:flex;align-items:center;justify-content:center;">
   <div style="position:relative;width:24px;height:24px;border-radius:50%;background:#059669;border:1px solid #34d399;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:700;box-shadow:0 0 8px rgba(16,185,129,0.5);${sel}">✓</div>
   <div style="position:absolute;bottom:-20px;left:50%;transform:translateX(-50%);background:rgba(2,44,2,0.95);border:1px solid rgba(16,185,129,0.4);color:#34d399;font-family:monospace;font-size:8px;padding:2px 4px;border-radius:3px;white-space:nowrap;">${vfr}</div>
 </div>`;
     }
-
     const icons: Record<string, string> = { transit: '🚂', epicenter: '⛩', holding: '🅿', chokepoint: '⚡' };
     return `
 <div style="position:relative;width:44px;height:44px;display:flex;align-items:center;justify-content:center;">
@@ -68,156 +77,193 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     onNodeSelect,
 }) => {
     const containerRef = useRef<HTMLDivElement>(null);
-    const mapRef = useRef<L.Map | null>(null);
-    const markersRef = useRef<L.Marker[]>([]);
-    const routesRef = useRef<L.Polyline[]>([]);
+    const [engine, setEngine] = useState<'booting' | 'google' | 'leaflet'>('booting');
 
-    // ── Init Leaflet map once ─────────────────────────────────────────────────
+    // Google Maps refs
+    const gMapRef = useRef<any>(null);
+    const gOverlaysRef = useRef<any[]>([]);
+    const gRoutesRef = useRef<any[]>([]);
+
+    // Leaflet refs
+    const lMapRef = useRef<L.Map | null>(null);
+    const lMarkersRef = useRef<L.Marker[]>([]);
+    const lRoutesRef = useRef<L.Polyline[]>([]);
+
+    // ── Boot: try Google Maps via importLibrary, fall back to Leaflet ─────────
     useEffect(() => {
-        if (mapRef.current || !containerRef.current) return;
+        let cancelled = false;
 
-        const map = L.map(containerRef.current, {
-            center: UJJAIN_CENTER,
-            zoom: 14,
-            zoomControl: false,
-            attributionControl: false,
-        });
+        const tryGoogle = async () => {
+            try {
+                // google.maps.importLibrary is registered by the bootstrap script in index.html
+                const mapsLib: any = await (google as any).maps.importLibrary('maps');
+                if (cancelled || !containerRef.current) return;
 
-        L.tileLayer(DARK_TILE, {
-            maxZoom: 19,
-            subdomains: 'abcd',
-            attribution: '© CartoDB © OpenStreetMap',
-        }).addTo(map);
+                const map = new mapsLib.Map(containerRef.current, {
+                    center: { lat: UJJAIN_CENTER[0], lng: UJJAIN_CENTER[1] },
+                    zoom: 14,
+                    styles: darkMapStyle,
+                    disableDefaultUI: true,
+                    zoomControl: true,
+                    backgroundColor: '#070b13',
+                });
 
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
-        L.control.attribution({ position: 'bottomleft', prefix: '' })
-            .addTo(map)
-            .addAttribution('© CartoDB');
+                // Traffic layer — shows real-time green/yellow/red road overlays
+                new mapsLib.TrafficLayer().setMap(map);
 
-        mapRef.current = map;
+                gMapRef.current = map;
+                if (!cancelled) setEngine('google');
+            } catch (e) {
+                console.warn('Google Maps failed, using Leaflet fallback:', e);
+                if (!cancelled) initLeaflet();
+            }
+        };
 
-        // Must call invalidateSize after a frame to prevent grey tiles
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => map.invalidateSize());
-        });
+        const initLeaflet = () => {
+            if (!containerRef.current || lMapRef.current) return;
+            const map = L.map(containerRef.current, {
+                center: UJJAIN_CENTER,
+                zoom: 14,
+                zoomControl: false,
+                attributionControl: false,
+            });
+            L.tileLayer(DARK_TILE, { maxZoom: 19, subdomains: 'abcd' }).addTo(map);
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+            lMapRef.current = map;
+            setEngine('leaflet');
+            requestAnimationFrame(() => requestAnimationFrame(() => map.invalidateSize()));
+        };
+
+        // Wait for the bootstrap loader to register importLibrary (≤2s)
+        const waitForGoogle = () => {
+            if (typeof google !== 'undefined' && google?.maps?.importLibrary) {
+                tryGoogle();
+            } else if (!cancelled) {
+                setTimeout(waitForGoogle, 150);
+            }
+        };
+
+        // Fallback to Leaflet after 3s if Google never loads
+        const fallbackTimer = setTimeout(() => {
+            if (!gMapRef.current && !lMapRef.current) initLeaflet();
+        }, 3000);
+
+        waitForGoogle();
 
         return () => {
-            map.remove();
-            mapRef.current = null;
+            cancelled = true;
+            clearTimeout(fallbackTimer);
         };
     }, []);
 
-    // ── Re-render markers on state change ────────────────────────────────────
+    // ── Render markers ────────────────────────────────────────────────────────
     useEffect(() => {
-        const map = mapRef.current;
-        if (!map) return;
+        if (engine === 'booting') return;
 
-        markersRef.current.forEach(m => m.remove());
-        markersRef.current = [];
+        // GOOGLE MAPS markers
+        if (engine === 'google' && gMapRef.current) {
+            gOverlaysRef.current.forEach(o => o.setMap(null));
+            gOverlaysRef.current = [];
 
-        UJJAIN_LOCATIONS.forEach(node => {
-            const ns = simMetrics?.nodes[node.id];
-            const isSelected = selectedNode?.id === node.id;
-            const html = buildMarkerHTML(node, simulationActive, isSelected, ns);
+            class CustomOverlay extends google.maps.OverlayView {
+                el: HTMLElement; pos: any;
+                constructor(pos: any, el: HTMLElement) { super(); this.pos = pos; this.el = el; }
+                onAdd() { this.getPanes()!.overlayMouseTarget.appendChild(this.el); }
+                draw() {
+                    const pt = this.getProjection().fromLatLngToDivPixel(this.pos);
+                    if (pt) { this.el.style.cssText += `left:${pt.x}px;top:${pt.y}px;position:absolute;transform:translate(-50%,-50%);cursor:pointer;z-index:10;`; }
+                }
+                onRemove() { this.el.parentNode?.removeChild(this.el); }
+            }
 
-            const icon = L.divIcon({
-                className: '',
-                html: `<style>
-                    @keyframes crush-ping {
-                        0%   { transform: scale(1);   opacity: 0.8; }
-                        100% { transform: scale(2.2); opacity: 0;   }
-                    }
-                </style>${html}`,
-                iconSize: [56, 56],
-                iconAnchor: [28, 28],
+            UJJAIN_LOCATIONS.forEach(node => {
+                const ns = simMetrics?.nodes[node.id];
+                const isSelected = selectedNode?.id === node.id;
+                const el = document.createElement('div');
+                el.innerHTML = buildMarkerHTML(node, simulationActive, isSelected, ns);
+                el.onclick = (e) => { e.stopPropagation(); onNodeSelect(node); };
+                const o = new CustomOverlay(new google.maps.LatLng(node.lat, node.lng), el);
+                o.setMap(gMapRef.current);
+                gOverlaysRef.current.push(o);
             });
+        }
 
-            const marker = L.marker([node.lat, node.lng], { icon }).addTo(map);
-            marker.on('click', () => onNodeSelect(node));
+        // LEAFLET markers
+        if (engine === 'leaflet' && lMapRef.current) {
+            lMarkersRef.current.forEach(m => m.remove());
+            lMarkersRef.current = [];
+            UJJAIN_LOCATIONS.forEach(node => {
+                const ns = simMetrics?.nodes[node.id];
+                const isSelected = selectedNode?.id === node.id;
+                const html = buildMarkerHTML(node, simulationActive, isSelected, ns);
+                const icon = L.divIcon({
+                    className: '',
+                    html: `<style>@keyframes crush-ping{0%{transform:scale(1);opacity:.8}100%{transform:scale(2.2);opacity:0}}</style>${html}`,
+                    iconSize: [56, 56], iconAnchor: [28, 28],
+                });
+                const marker = L.marker([node.lat, node.lng], { icon }).addTo(lMapRef.current!);
+                marker.on('click', () => onNodeSelect(node));
+                lMarkersRef.current.push(marker);
+            });
+            lMapRef.current.invalidateSize();
+        }
+    }, [engine, simulationActive, simMetrics, selectedNode, onNodeSelect]);
 
-            // Dark popup
-            const status = ns ? `VFR: ${ns.vfr.toFixed(2)} · ${ns.status.toUpperCase()}` : `Cap: ${node.maxCapacityPedestrians.toLocaleString()}`;
-            marker.bindPopup(`
-                <div style="font-family:sans-serif;min-width:200px;">
-                    <div style="font-weight:700;color:#e2e8f0;font-size:13px;margin-bottom:4px;">${node.name}</div>
-                    <div style="font-size:10px;color:#38bdf8;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px;">${node.type}</div>
-                    <div style="font-size:11px;font-family:monospace;color:#94a3b8;margin-bottom:8px;">${status}</div>
-                    <div style="font-size:10px;color:#64748b;line-height:1.5;border-top:1px solid #1e293b;padding-top:6px;">${node.onGroundRiskFactor}</div>
-                </div>
-            `, { className: 'dark-popup', maxWidth: 280 });
-
-            markersRef.current.push(marker);
-        });
-
-        map.invalidateSize();
-    }, [simulationActive, simMetrics, selectedNode, onNodeSelect]);
-
-    // ── Render routes when mitigations toggle ─────────────────────────────────
+    // ── Render bypass routes ──────────────────────────────────────────────────
     useEffect(() => {
-        const map = mapRef.current;
-        if (!map) return;
-
-        routesRef.current.forEach(p => p.remove());
-        routesRef.current = [];
-
-        if (!simulationActive) return;
-
+        if (engine === 'booting') return;
         const [b1, b2] = UJJAIN_BACKUP_ROUTES;
 
-        if (mitigationDiversion && b1) {
-            routesRef.current.push(
-                L.polyline(b1.pathCoordinates.map(c => [c.lat, c.lng] as [number, number]), {
-                    color: '#f97316', weight: 5, opacity: 0.9, dashArray: '10,5',
-                })
-                    .addTo(map)
-                    .bindTooltip(`<b>${b1.name}</b><br>${b1.strategicAdvantage}`, { sticky: true })
-            );
+        if (engine === 'google' && gMapRef.current) {
+            gRoutesRef.current.forEach(p => p.setMap(null));
+            gRoutesRef.current = [];
+            if (simulationActive && mitigationDiversion && b1) {
+                const p = new google.maps.Polyline({ path: b1.pathCoordinates.map(c => ({ lat: c.lat, lng: c.lng })), strokeColor: '#f97316', strokeOpacity: 0.9, strokeWeight: 5 });
+                p.setMap(gMapRef.current); gRoutesRef.current.push(p);
+            }
+            if (simulationActive && mitigationBypass && b2) {
+                const p = new google.maps.Polyline({ path: b2.pathCoordinates.map(c => ({ lat: c.lat, lng: c.lng })), strokeColor: '#a78bfa', strokeOpacity: 0.9, strokeWeight: 5 });
+                p.setMap(gMapRef.current); gRoutesRef.current.push(p);
+            }
         }
 
-        if (mitigationBypass && b2) {
-            routesRef.current.push(
-                L.polyline(b2.pathCoordinates.map(c => [c.lat, c.lng] as [number, number]), {
-                    color: '#a78bfa', weight: 5, opacity: 0.9, dashArray: '8,4',
-                })
-                    .addTo(map)
-                    .bindTooltip(`<b>${b2.name}</b><br>${b2.strategicAdvantage}`, { sticky: true })
-            );
+        if (engine === 'leaflet' && lMapRef.current) {
+            lRoutesRef.current.forEach(p => p.remove());
+            lRoutesRef.current = [];
+            if (simulationActive && mitigationDiversion && b1)
+                lRoutesRef.current.push(L.polyline(b1.pathCoordinates.map(c => [c.lat, c.lng] as [number, number]), { color: '#f97316', weight: 5, dashArray: '10,5' }).addTo(lMapRef.current!));
+            if (simulationActive && mitigationBypass && b2)
+                lRoutesRef.current.push(L.polyline(b2.pathCoordinates.map(c => [c.lat, c.lng] as [number, number]), { color: '#a78bfa', weight: 5, dashArray: '8,4' }).addTo(lMapRef.current!));
         }
-    }, [simulationActive, mitigationDiversion, mitigationBypass]);
+    }, [engine, simulationActive, mitigationDiversion, mitigationBypass]);
 
     return (
-        // All sizing via explicit inline styles — zero Tailwind dependency
-        <div style={{
-            position: 'relative',
-            flex: 1,
-            height: '100vh',
-            overflow: 'hidden',
-            background: '#070b13',
-            minWidth: 0,      // prevents flex child from overflowing
-        }}>
-            {/* The Leaflet mount target — must have explicit pixel-independent size */}
-            <div
-                ref={containerRef}
-                style={{ width: '100%', height: '100%', minHeight: '100vh' }}
-            />
+        <div style={{ position: 'relative', flex: 1, height: '100vh', overflow: 'hidden', background: '#070b13', minWidth: 0 }}>
+            {/* Spinning boot indicator */}
+            {engine === 'booting' && (
+                <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, zIndex: 50 }}>
+                    <div style={{ width: 36, height: 36, border: '3px solid #22d3ee', borderTopColor: 'transparent', borderRadius: '50%', animation: 'gmaps-spin 1s linear infinite' }} />
+                    <span style={{ color: '#64748b', fontFamily: 'monospace', fontSize: 11, letterSpacing: '0.1em' }}>LOADING GOOGLE MAPS…</span>
+                    <style>{`@keyframes gmaps-spin{to{transform:rotate(360deg)}}`}</style>
+                </div>
+            )}
 
-            {/* Overlay header */}
+            {/* Map container — explicit size, no Tailwind */}
+            <div ref={containerRef} style={{ width: '100%', height: '100%', minHeight: '100vh', display: engine === 'booting' ? 'none' : 'block' }} />
+
+            {/* Header badge */}
             <div className="map-overlay-header">
                 <span className="map-badge">
                     <span className={`map-badge-dot ${simulationActive ? 'active' : ''}`} />
-                    {simulationActive ? 'SIMULATION ACTIVE' : 'LIVE TRANSIT COMMAND · UJJAIN'}
+                    {engine === 'google' ? (simulationActive ? 'SIMULATION ACTIVE · GOOGLE MAPS' : 'LIVE TRAFFIC · GOOGLE MAPS') : (simulationActive ? 'SIMULATION ACTIVE' : 'LIVE TRANSIT COMMAND')}
                 </span>
-                <span className="map-badge map-badge-coords">
-                    23.18°N 75.77°E · SIMHASTHA ZONE
-                </span>
+                <span className="map-badge map-badge-coords">UJJAIN SIMHASTHA ZONE · 23.18°N 75.77°E</span>
             </div>
 
-            {/* VFR Crush Alert */}
+            {/* Crush alert */}
             {simMetrics && simMetrics.vfr >= 1.25 && (
                 <div className="vfr-alert-overlay">
-                    <span className="vfr-alert-text">
-                        ⚠ CRUSH THRESHOLD BREACHED — VFR {simMetrics.vfr.toFixed(2)} — ENGAGE MITIGATIONS
-                    </span>
+                    <span className="vfr-alert-text">⚠ CRUSH THRESHOLD BREACHED — VFR {simMetrics.vfr.toFixed(2)} — ENGAGE MITIGATIONS</span>
                 </div>
             )}
 
