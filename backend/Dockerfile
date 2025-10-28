@@ -1,23 +1,22 @@
-# Multi-stage build for Spring Boot Backend
-FROM eclipse-temurin:21-jdk-alpine AS build
+# Multi-stage Dockerfile using official Maven + OpenJDK 21 image
+FROM maven:3.9.6-eclipse-temurin-21-alpine AS build
 WORKDIR /app
 
-# Copy maven wrapper and pom.xml
-COPY mvnw .
-COPY .mvn .mvn
+# Copy pom.xml and download dependencies
 COPY pom.xml .
+RUN mvn dependency:go-offline -B
 
-# Download dependencies
-RUN ./mvnw dependency:go-offline -B
+# Copy source code and build production jar
+COPY src ./src
+RUN mvn clean package -DskipTests -B
 
-# Copy source code and build package
-COPY src src
-RUN ./mvnw package -DskipTests -B
-
-# Production stage
+# Lightweight JRE runtime stage
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
+
+# Copy built jar from build stage
 COPY --from=build /app/target/crowd-manager-1.0.0.jar app.jar
 
+# Render assigns port dynamically via PORT env var or defaults to 8080
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]
