@@ -1,9 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import React, { useEffect, useRef } from 'react';
+import { Wrapper } from '@googlemaps/react-wrapper';
 import type { LocationNode } from '../data/keyinfo';
 import { UJJAIN_LOCATIONS, UJJAIN_BACKUP_ROUTES } from '../data/keyinfo';
 import type { SimMetrics } from '../data/simulationEngine';
+
+declare const google: any;
+
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY || 'AIzaSyAT_85QglVkY0TBfcM5qwoLNoE6oJ7WREA';
 
 interface MapCanvasProps {
     simulationActive: boolean;
@@ -14,67 +17,140 @@ interface MapCanvasProps {
     onNodeSelect: (node: LocationNode) => void;
 }
 
-// Custom dark tile layer
-const DARK_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+// Custom Dark Theme for Google Maps
+const darkMapStyle = [
+    { elementType: "geometry", stylers: [{ color: "#0f172a" }] },
+    { elementType: "labels.text.stroke", stylers: [{ color: "#0b0f19" }] },
+    { elementType: "labels.text.fill", stylers: [{ color: "#64748b" }] },
+    { featureType: "administrative.locality", elementType: "labels.text.fill", stylers: [{ color: "#94a3b8" }] },
+    { featureType: "poi", elementType: "labels.text.fill", stylers: [{ color: "#475569" }] },
+    { featureType: "poi.park", elementType: "geometry", stylers: [{ color: "#0b1329" }] },
+    { featureType: "poi.park", elementType: "labels.text.fill", stylers: [{ color: "#334155" }] },
+    { featureType: "road", elementType: "geometry", stylers: [{ color: "#1e293b" }] },
+    { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#0f172a" }] },
+    { featureType: "road", elementType: "labels.text.fill", stylers: [{ color: "#475569" }] },
+    { featureType: "road.highway", elementType: "geometry", stylers: [{ color: "#334155" }] },
+    { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#1e293b" }] },
+    { featureType: "road.highway", elementType: "labels.text.fill", stylers: [{ color: "#94a3b8" }] },
+    { featureType: "transit", elementType: "geometry", stylers: [{ color: "#0b1329" }] },
+    { featureType: "transit.station", elementType: "labels.text.fill", stylers: [{ color: "#64748b" }] },
+    { featureType: "water", elementType: "geometry", stylers: [{ color: "#070b13" }] },
+    { featureType: "water", elementType: "labels.text.fill", stylers: [{ color: "#334155" }] },
+    { featureType: "water", elementType: "labels.text.stroke", stylers: [{ color: "#070b13" }] },
+];
 
-const getNodeColor = (node: LocationNode, simMetrics: SimMetrics | null): string => {
-    if (!simMetrics) {
-        const typeColors: Record<string, string> = {
-            transit: '#38bdf8',
-            epicenter: '#a78bfa',
-            holding: '#34d399',
-            chokepoint: '#fb923c',
-        };
-        return typeColors[node.type] || '#94a3b8';
+let ReactOverlayClass: any = null;
+
+function getReactOverlayClass() {
+    if (ReactOverlayClass) return ReactOverlayClass;
+
+    ReactOverlayClass = class extends google.maps.OverlayView {
+        private element: HTMLElement;
+        private position: any;
+
+        constructor(position: any, element: HTMLElement) {
+            super();
+            this.position = position;
+            this.element = element;
+        }
+
+        onAdd() {
+            const pane = (this as any).getPanes()?.overlayMouseTarget;
+            if (pane) {
+                pane.appendChild(this.element);
+            }
+        }
+
+        draw() {
+            const projection = (this as any).getProjection();
+            if (!projection) return;
+            const point = projection.fromLatLngToDivPixel(this.position);
+            if (point) {
+                this.element.style.left = `${point.x}px`;
+                this.element.style.top = `${point.y}px`;
+                this.element.style.position = 'absolute';
+                this.element.style.transform = 'translate(-50%, -50%)';
+                this.element.style.cursor = 'pointer';
+            }
+        }
+
+        onRemove() {
+            if (this.element.parentNode) {
+                this.element.parentNode.removeChild(this.element);
+            }
+        }
+    };
+
+    return ReactOverlayClass;
+}
+
+const compileMarkerHTML = (node: LocationNode, isSimulationActive: boolean, isSelected: boolean, nodeStatus?: any) => {
+    const isSelectedClass = isSelected ? 'ring-4 ring-cyan-400 rounded-full p-1 scale-125' : '';
+
+    if (isSimulationActive && nodeStatus) {
+        const vfrStr = `VFR: ${nodeStatus.vfr.toFixed(2)}`;
+
+        if (nodeStatus.status === 'danger') {
+            return `
+        <div class="relative flex items-center justify-center ${isSelectedClass}">
+          <div class="absolute w-12 h-12 bg-red-500/40 rounded-full animate-ping"></div>
+          <div class="absolute w-20 h-20 bg-red-500/20 rounded-full animate-pulse"></div>
+          <div class="relative w-8 h-8 bg-red-600 rounded-full flex items-center justify-center border-2 border-white text-white font-bold text-xs shadow-lg shadow-red-500/80">
+            ⚡
+          </div>
+          <div class="absolute -bottom-8 bg-red-950 border border-red-500 text-red-300 font-mono font-bold px-2 py-0.5 rounded text-[10px] whitespace-nowrap shadow-lg tracking-wider uppercase">
+            CRUSH (${vfrStr})
+          </div>
+        </div>
+      `;
+        }
+
+        if (nodeStatus.status === 'warning') {
+            return `
+        <div class="relative flex items-center justify-center ${isSelectedClass}">
+          <div class="absolute w-10 h-10 bg-amber-500/30 rounded-full animate-ping"></div>
+          <div class="relative w-7 h-7 bg-amber-500 rounded-full flex items-center justify-center border-2 border-slate-900 text-slate-950 font-bold text-xs shadow-md">
+            ⚠
+          </div>
+          <div class="absolute -bottom-7 bg-amber-950 border border-amber-500/60 text-amber-300 font-mono px-1.5 py-0.5 rounded text-[9px] whitespace-nowrap shadow-md">
+            WARN (${vfrStr})
+          </div>
+        </div>
+      `;
+        }
+
+        return `
+      <div class="relative flex items-center justify-center ${isSelectedClass}">
+        <div class="relative w-6 h-6 bg-emerald-600 rounded-full flex items-center justify-center border border-emerald-300 text-white font-medium text-[10px] shadow-sm">
+          ✓
+        </div>
+        <div class="absolute -bottom-6 bg-slate-900 border border-emerald-500/40 text-emerald-400 font-mono px-1.5 py-0.5 rounded text-[8px] whitespace-nowrap">
+          ${vfrStr}
+        </div>
+      </div>
+    `;
     }
-    const status = simMetrics.nodes[node.id]?.status;
-    if (status === 'danger') return '#ef4444';
-    if (status === 'warning') return '#f59e0b';
-    return '#10b981';
-};
 
-const getNodeIcon = (node: LocationNode, simMetrics: SimMetrics | null, isSelected: boolean): L.DivIcon => {
-    const color = getNodeColor(node, simMetrics);
-    const nodeStatus = simMetrics?.nodes[node.id];
-    const status = nodeStatus?.status || 'nominal';
-    const isDanger = status === 'danger';
-    const isWarning = status === 'warning';
-
-    const pulseRing = isDanger
-        ? `<div class="node-pulse-danger"></div>`
-        : isWarning ? `<div class="node-pulse-warning"></div>` : '';
-
-    const label = nodeStatus
-        ? `<div class="node-label" style="background:${isDanger ? 'rgba(127,29,29,0.95)' : isWarning ? 'rgba(120,53,15,0.95)' : 'rgba(6,27,6,0.95)'}; border-color:${color}; color:${color};">
-            ${isDanger ? '⚠ CRUSH' : isWarning ? '⚠ WARN' : '✓ OK'} (VFR:${nodeStatus.vfr.toFixed(2)})
-           </div>`
-        : '';
-
-    return L.divIcon({
-        className: '',
-        html: `<div class="node-wrapper ${isSelected ? 'node-selected' : ''}">
-            ${pulseRing}
-            <div class="node-dot" style="background:${color}; box-shadow: 0 0 12px ${color}88, 0 0 4px ${color};">
-                <span class="node-type-icon">${getTypeIcon(node.type)}</span>
-            </div>
-            ${label}
-        </div>`,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18],
-    });
-};
-
-const getTypeIcon = (type: string): string => {
-    const icons: Record<string, string> = {
+    const typeIcons: Record<string, string> = {
         transit: '🚂',
         epicenter: '⛩',
         holding: '🅿',
         chokepoint: '⚡',
     };
-    return icons[type] || '📍';
+
+    return `
+    <div class="relative flex items-center justify-center ${isSelectedClass}">
+      <div class="relative w-8 h-8 bg-slate-900 border-2 border-cyan-400 rounded-full flex items-center justify-center text-cyan-300 font-bold text-sm shadow-lg shadow-cyan-950/50">
+        ${typeIcons[node.type] || '📍'}
+      </div>
+      <div class="absolute -bottom-6 bg-slate-950 border border-slate-700 text-slate-200 font-sans px-1.5 py-0.5 rounded text-[9px] whitespace-nowrap shadow">
+        ${node.name.split(' ')[0]}
+      </div>
+    </div>
+  `;
 };
 
-export const MapCanvas: React.FC<MapCanvasProps> = ({
+const MapInner: React.FC<MapCanvasProps> = ({
     simulationActive,
     mitigationDiversion,
     mitigationBypass,
@@ -82,152 +158,122 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
     selectedNode,
     onNodeSelect,
 }) => {
-    const mapRef = useRef<L.Map | null>(null);
-    const mapDivRef = useRef<HTMLDivElement>(null);
-    const markersRef = useRef<L.Marker[]>([]);
-    const routeLayersRef = useRef<L.Polyline[]>([]);
-    const [mapReady, setMapReady] = useState(false);
+    const mapRef = useRef<HTMLDivElement>(null);
+    const googleMapRef = useRef<any>(null);
+    const trafficLayerRef = useRef<any>(null);
+    const overlaysRef = useRef<any[]>([]);
+    const polylinesRef = useRef<any[]>([]);
 
-    // Initialize map
     useEffect(() => {
-        if (!mapDivRef.current || mapRef.current) return;
+        if (!mapRef.current || googleMapRef.current) return;
 
-        const map = L.map(mapDivRef.current, {
-            center: [23.1765, 75.7780],
+        // Focused on Ujjain Mahakal Corridor & Ram Ghat area
+        const ujjainCenter = { lat: 23.1800, lng: 75.7720 };
+
+        const map = new google.maps.Map(mapRef.current, {
+            center: ujjainCenter,
             zoom: 14,
-            zoomControl: false,
-            attributionControl: false,
+            styles: darkMapStyle,
+            disableDefaultUI: true,
+            zoomControl: true,
+            backgroundColor: '#070b13',
         });
 
-        L.tileLayer(DARK_TILE_URL, {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap, © CARTO'
-        }).addTo(map);
+        googleMapRef.current = map;
 
-        L.control.zoom({ position: 'bottomright' }).addTo(map);
-        L.control.attribution({ position: 'bottomleft', prefix: '' }).addTo(map)
-            .addAttribution('© CartoDB');
-
-        mapRef.current = map;
-        setMapReady(true);
-
-        return () => {
-            map.remove();
-            mapRef.current = null;
-        };
+        // Mount Live Traffic Layer
+        const trafficLayer = new google.maps.TrafficLayer();
+        trafficLayer.setMap(map);
+        trafficLayerRef.current = trafficLayer;
     }, []);
 
-    // Update markers when simulation state changes
+    // Re-render markers and overlays when simulation state updates
     useEffect(() => {
-        if (!mapRef.current || !mapReady) return;
-        const map = mapRef.current;
+        if (!googleMapRef.current) return;
 
-        // Clear existing markers
-        markersRef.current.forEach(m => m.remove());
-        markersRef.current = [];
+        // Remove old overlays
+        overlaysRef.current.forEach(overlay => overlay.setMap(null));
+        overlaysRef.current = [];
 
-        // Add markers for each location
+        const OverlayClass = getReactOverlayClass();
+
         UJJAIN_LOCATIONS.forEach(node => {
             const isSelected = selectedNode?.id === node.id;
-            const icon = getNodeIcon(node, simMetrics, isSelected);
-            const marker = L.marker([node.lat, node.lng], { icon });
-
-            marker.on('click', () => onNodeSelect(node));
-
-            // Popup with node details
             const nodeStatus = simMetrics?.nodes[node.id];
-            const popupContent = `
-                <div class="map-popup">
-                    <div class="popup-header">${node.name}</div>
-                    <div class="popup-type">${node.type.toUpperCase()}</div>
-                    ${nodeStatus ? `
-                    <div class="popup-stats">
-                        <span>Load: ${nodeStatus.currentLoad.toLocaleString()}</span>
-                        <span>VFR: ${nodeStatus.vfr.toFixed(2)}</span>
-                        <span class="popup-status-${nodeStatus.status}">${nodeStatus.status.toUpperCase()}</span>
-                    </div>` : `
-                    <div class="popup-stats">
-                        <span>Capacity: ${node.maxCapacityPedestrians.toLocaleString()}</span>
-                    </div>`}
-                    <div class="popup-risk">${node.onGroundRiskFactor}</div>
-                </div>
-            `;
-            marker.bindPopup(popupContent, { className: 'dark-popup', maxWidth: 280 });
-            marker.addTo(map);
-            markersRef.current.push(marker);
+
+            const el = document.createElement('div');
+            el.innerHTML = compileMarkerHTML(node, simulationActive, isSelected, nodeStatus);
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                onNodeSelect(node);
+            });
+
+            const overlay = new OverlayClass(
+                new google.maps.LatLng(node.lat, node.lng),
+                el
+            );
+
+            overlay.setMap(googleMapRef.current);
+            overlaysRef.current.push(overlay);
         });
-    }, [mapReady, simMetrics, selectedNode, onNodeSelect]);
+    }, [simulationActive, simMetrics, selectedNode, onNodeSelect]);
 
-    // Update route overlays when mitigation toggles change
+    // Render mitigation bypass routes on the map
     useEffect(() => {
-        if (!mapRef.current || !mapReady) return;
-        const map = mapRef.current;
+        if (!googleMapRef.current) return;
 
-        // Remove old route layers
-        routeLayersRef.current.forEach(l => l.remove());
-        routeLayersRef.current = [];
+        polylinesRef.current.forEach(p => p.setMap(null));
+        polylinesRef.current = [];
 
         if (!simulationActive) return;
 
         const [b1Route, b2Route] = UJJAIN_BACKUP_ROUTES;
 
-        // B1: Outer ring diversion — shown when mitigationDiversion active
+        // Harifatak Outer Ring Diversion
         if (mitigationDiversion && b1Route) {
-            const polyline = L.polyline(
-                b1Route.pathCoordinates.map(c => [c.lat, c.lng]),
-                {
-                    color: '#f97316',
-                    weight: 4,
-                    opacity: 0.85,
-                    dashArray: '10, 6',
-                    className: 'route-animated',
-                }
-            );
-            polyline.bindTooltip(
-                `<b>${b1Route.name}</b><br>${b1Route.strategicAdvantage}`,
-                { sticky: true, className: 'route-tooltip' }
-            );
-            polyline.addTo(map);
-            routeLayersRef.current.push(polyline);
+            const path = b1Route.pathCoordinates.map(c => ({ lat: c.lat, lng: c.lng }));
+            const polyline = new google.maps.Polyline({
+                path,
+                geodesic: true,
+                strokeColor: '#f97316',
+                strokeOpacity: 0.9,
+                strokeWeight: 5,
+            });
+            polyline.setMap(googleMapRef.current);
+            polylinesRef.current.push(polyline);
         }
 
-        // B2: Dani Gate bypass — shown when mitigationBypass active
+        // Dani Gate Catwalk Bypass
         if (mitigationBypass && b2Route) {
-            const polyline = L.polyline(
-                b2Route.pathCoordinates.map(c => [c.lat, c.lng]),
-                {
-                    color: '#a78bfa',
-                    weight: 4,
-                    opacity: 0.85,
-                    dashArray: '8, 4',
-                    className: 'route-animated',
-                }
-            );
-            polyline.bindTooltip(
-                `<b>${b2Route.name}</b><br>${b2Route.strategicAdvantage}`,
-                { sticky: true, className: 'route-tooltip' }
-            );
-            polyline.addTo(map);
-            routeLayersRef.current.push(polyline);
+            const path = b2Route.pathCoordinates.map(c => ({ lat: c.lat, lng: c.lng }));
+            const polyline = new google.maps.Polyline({
+                path,
+                geodesic: true,
+                strokeColor: '#a78bfa',
+                strokeOpacity: 0.9,
+                strokeWeight: 5,
+            });
+            polyline.setMap(googleMapRef.current);
+            polylinesRef.current.push(polyline);
         }
-    }, [mapReady, simulationActive, mitigationDiversion, mitigationBypass]);
+    }, [simulationActive, mitigationDiversion, mitigationBypass]);
 
     return (
         <div className="relative flex-1 h-screen overflow-hidden">
-            <div ref={mapDivRef} className="w-full h-full" />
+            <div ref={mapRef} className="w-full h-full" />
 
-            {/* Map overlay: header badge */}
+            {/* Map Overlay Header Badge */}
             <div className="map-overlay-header">
                 <span className="map-badge">
                     <span className={`map-badge-dot ${simulationActive ? 'active' : ''}`} />
-                    {simulationActive ? 'SIMULATION ACTIVE' : 'LIVE MONITOR'}
+                    {simulationActive ? 'SIMULATION ACTIVE' : 'LIVE GOOGLE MAPS TRAFFIC TELEMETRY'}
                 </span>
                 <span className="map-badge map-badge-coords">
-                    UJJAIN · 23.18°N 75.78°E · Madhya Pradesh
+                    UJJAIN SIMHASTHA ZONE · 23.18°N 75.77°E
                 </span>
             </div>
 
-            {/* VFR alert overlay when danger */}
+            {/* VFR Crush Alert Overlay */}
             {simMetrics && simMetrics.vfr >= 1.25 && (
                 <div className="vfr-alert-overlay">
                     <span className="vfr-alert-text">
@@ -236,19 +282,27 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
                 </div>
             )}
 
-            {/* Legend */}
+            {/* Map Legend */}
             <div className="map-legend">
-                <div className="legend-title">NODE STATUS</div>
-                <div className="legend-item"><span className="legend-dot" style={{background:'#10b981'}}/>Nominal</div>
-                <div className="legend-item"><span className="legend-dot" style={{background:'#f59e0b'}}/>Warning (VFR ≥ 0.85)</div>
-                <div className="legend-item"><span className="legend-dot" style={{background:'#ef4444'}}/>CRUSH RISK (VFR ≥ 1.25)</div>
+                <div className="legend-title">GEOSPATIAL CANVAS</div>
+                <div className="legend-item"><span className="legend-dot" style={{ background: '#10b981' }} />Nominal Flow</div>
+                <div className="legend-item"><span className="legend-dot" style={{ background: '#f59e0b' }} />Warning (VFR ≥ 0.85)</div>
+                <div className="legend-item"><span className="legend-dot" style={{ background: '#ef4444' }} />CRUSH RISK (VFR ≥ 1.25)</div>
                 {simulationActive && mitigationDiversion && (
-                    <div className="legend-item"><span className="legend-line" style={{background:'#f97316'}}/>Outer Ring Diversion</div>
+                    <div className="legend-item"><span className="legend-line" style={{ background: '#f97316' }} />Harifatak Outer Ring</div>
                 )}
                 {simulationActive && mitigationBypass && (
-                    <div className="legend-item"><span className="legend-line" style={{background:'#a78bfa'}}/>Dani Gate Bypass</div>
+                    <div className="legend-item"><span className="legend-line" style={{ background: '#a78bfa' }} />Dani Gate Catwalk</div>
                 )}
             </div>
         </div>
+    );
+};
+
+export const MapCanvas: React.FC<MapCanvasProps> = (props) => {
+    return (
+        <Wrapper apiKey={GOOGLE_MAPS_API_KEY}>
+            <MapInner {...props} />
+        </Wrapper>
     );
 };
