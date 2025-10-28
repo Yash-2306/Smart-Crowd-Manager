@@ -159,7 +159,7 @@ export const MapCanvas: React.FC<MapCanvasProps> = ({
         } else if (!document.getElementById(scriptId)) {
             const script = document.createElement('script');
             script.id = scriptId;
-            script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&libraries=traffic`;
+            script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_API_KEY}&loading=async`;
             script.async = true;
             script.onload = () => {
                 setTimeout(() => {
